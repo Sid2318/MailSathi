@@ -182,10 +182,6 @@ body {
   color: #666;
   font-size: 0.9rem;
 }
-
-/* Add a nice font for Marathi text */
-@import url('https://fonts.googleapis.com/css2?family=Hind:wght@400;500&display=swap');
-
 .translation-result p {
   font-family: 'Hind', sans-serif;
   font-weight: 500;

@@ -184,7 +184,6 @@ class GmailClient:
         except Exception as e:
             logger.error(f"Error getting email content: {str(e)}")
             raise
-    
     def _get_email_body(self, message: Dict[str, Any]) -> str:
         """
         Extract the body from an email message
