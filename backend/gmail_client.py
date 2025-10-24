@@ -8,6 +8,9 @@ from googleapiclient.discovery import build
 from email.mime.text import MIMEText
 import logging
 from dotenv import load_dotenv
+from html import unescape
+from html.parser import HTMLParser
+import re
 
 # Load environment variables at module level
 load_dotenv()
@@ -186,27 +189,36 @@ class GmailClient:
             raise
     def _get_email_body(self, message: Dict[str, Any]) -> str:
         """
-        Extract the body from an email message
+        Extract the body from an email message. Prefer text/plain, fall back to
+        text/html and convert HTML to cleaned plain text. This strips tags and
+        removes common tracking pixels by ignoring <img> content.
         """
         body = ""
         
         if 'parts' in message.get('payload', {}):
+            # Try to pick a text/plain part first
             for part in message['payload']['parts']:
                 if part.get('mimeType') == 'text/plain':
                     body = self._decode_body(part.get('body', {}).get('data', ''))
                     break
-            
-            # If no text/plain part found, try to get HTML and extract text
+
+            # If no text/plain part found, try to get HTML and convert to text
             if not body:
                 for part in message['payload']['parts']:
                     if part.get('mimeType') == 'text/html':
-                        body = self._decode_body(part.get('body', {}).get('data', ''))
-                        # TODO: Add HTML to text conversion if needed
+                        html_content = self._decode_body(part.get('body', {}).get('data', ''))
+                        body = self._html_to_text(html_content)
                         break
         else:
             # Handle single-part messages
             if message.get('payload', {}).get('body', {}).get('data'):
-                body = self._decode_body(message['payload']['body']['data'])
+                # If this is HTML, convert to text; otherwise decode directly
+                # We make a best-effort guess by checking for HTML tags
+                raw = self._decode_body(message['payload']['body']['data'])
+                if '<' in raw and '>' in raw:
+                    body = self._html_to_text(raw)
+                else:
+                    body = raw
         
         return body
     
@@ -222,3 +234,44 @@ class GmailClient:
         except Exception as e:
             logger.error(f"Error decoding email body: {str(e)}")
             return "Error decoding email content"
+
+    def _html_to_text(self, html_content: str) -> str:
+        """
+        Convert HTML content to plain text. This is a small, dependency-free
+        stripper: it removes tags, unescapes HTML entities and collapses
+        whitespace. It intentionally ignores images and common tracking pixels.
+        """
+        if not html_content:
+            return ""
+
+        class _MLStripper(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self._fed = []
+
+            def handle_data(self, d):
+                self._fed.append(d)
+
+            def handle_entityref(self, name):
+                self._fed.append(self.unescape(f'&{name};'))
+
+            def get_data(self):
+                return ''.join(self._fed)
+
+        # Remove script/style tags content first
+        cleaned = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', html_content, flags=re.I | re.S)
+
+        # Initialize stripper and feed cleaned HTML
+        stripper = _MLStripper()
+        try:
+            stripper.feed(unescape(cleaned))
+            text = stripper.get_data()
+        except Exception:
+            # Fallback: strip tags crudely
+            text = re.sub('<[^<]+?>', ' ', cleaned)
+            text = unescape(text)
+
+        # Collapse whitespace and trim
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        return text

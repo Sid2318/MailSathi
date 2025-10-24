@@ -5,6 +5,7 @@ import "./App.css";
 function App() {
   const [text, setText] = useState("");
   const [translation, setTranslation] = useState("");
+  const [selectedLanguage, setSelectedLanguage] = useState("Marathi");
   const [isTranslating, setIsTranslating] = useState(false);
   const [error, setError] = useState("");
 
@@ -12,7 +13,6 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [emails, setEmails] = useState([]);
-  const [selectedEmail, setSelectedEmail] = useState(null);
   const [emailContent, setEmailContent] = useState(null);
   const [showEmailList, setShowEmailList] = useState(false);
 
@@ -73,6 +73,17 @@ function App() {
       setShowEmailList(true);
       setIsLoading(false);
     } catch (error) {
+      // If backend returned a 401 with an auth_url, redirect user to authenticate
+      if (
+        error.response &&
+        error.response.status === 401 &&
+        error.response.data &&
+        error.response.data.detail &&
+        error.response.data.detail.auth_url
+      ) {
+        window.location.href = error.response.data.detail.auth_url;
+        return;
+      }
       console.error("Error fetching emails:", error);
       setError("Failed to fetch emails. Please try again.");
       setIsLoading(false);
@@ -81,7 +92,6 @@ function App() {
 
   // Fetch and display email content
   const handleEmailSelect = async (messageId) => {
-    setSelectedEmail(messageId);
     setIsLoading(true);
 
     try {
@@ -96,6 +106,16 @@ function App() {
       setShowEmailList(false);
       setIsLoading(false);
     } catch (error) {
+      if (
+        error.response &&
+        error.response.status === 401 &&
+        error.response.data &&
+        error.response.data.detail &&
+        error.response.data.detail.auth_url
+      ) {
+        window.location.href = error.response.data.detail.auth_url;
+        return;
+      }
       console.error("Error fetching email content:", error);
       setError("Failed to load email content.");
       setIsLoading(false);
@@ -111,6 +131,7 @@ function App() {
         "http://127.0.0.1:8000/gmail/translate-email",
         {
           message_id: messageId,
+          language: selectedLanguage,
         }
       );
       setEmailContent(response.data.original_email);
@@ -118,6 +139,16 @@ function App() {
       setShowEmailList(false);
       setIsTranslating(false);
     } catch (error) {
+      if (
+        error.response &&
+        error.response.status === 401 &&
+        error.response.data &&
+        error.response.data.detail &&
+        error.response.data.detail.auth_url
+      ) {
+        window.location.href = error.response.data.detail.auth_url;
+        return;
+      }
       console.error("Error translating email:", error);
       setError("Failed to translate email content.");
       setIsTranslating(false);
@@ -138,9 +169,12 @@ function App() {
         "http://127.0.0.1:8000/translate-to-marathi",
         {
           text: text,
+          language: selectedLanguage,
         }
       );
-      setTranslation(response.data.marathi_translation);
+      setTranslation(
+        response.data.translation || response.data.marathi_translation
+      );
       setIsTranslating(false);
     } catch (error) {
       console.error("Error translating:", error);
@@ -155,7 +189,7 @@ function App() {
     <div className="app-container">
       <div className="app-header">
         <h1>📧 MailSathi</h1>
-        <p className="tagline">English to Marathi Translation</p>
+        <p className="tagline">Mail Translator</p>
 
         {/* Gmail Login Button */}
         <div className="gmail-auth-section">
@@ -257,6 +291,24 @@ function App() {
               placeholder="Type or paste English text here..."
               rows="6"
             />
+            <div style={{ marginTop: "0.75rem", textAlign: "left" }}>
+              <label style={{ fontSize: "0.9rem", marginRight: "0.5rem" }}>
+                Translate to:
+              </label>
+              <select
+                value={selectedLanguage}
+                onChange={(e) => setSelectedLanguage(e.target.value)}
+                style={{ padding: "6px 8px", borderRadius: "6px" }}
+              >
+                <option>Marathi</option>
+                <option>Hindi</option>
+                <option>Tamil</option>
+                <option>Kannada</option>
+                <option>Telugu</option>
+                <option>Bengali</option>
+                <option>English</option>
+              </select>
+            </div>
             {error && <div className="error-message">{error}</div>}
             <div className="button-group">
               {isAuthenticated && (
@@ -273,13 +325,15 @@ function App() {
                 onClick={handleTranslate}
                 disabled={isTranslating}
               >
-                {isTranslating ? "Translating..." : "Translate to Marathi"}
+                {isTranslating
+                  ? "Translating..."
+                  : `Translate to ${selectedLanguage}`}
               </button>
             </div>
           </div>
 
           <div className="output-section">
-            <h2>Marathi Translation</h2>
+            <h2>{selectedLanguage} Translation</h2>
             <div className="translation-result">
               {isTranslating ? (
                 <div className="loading-spinner">

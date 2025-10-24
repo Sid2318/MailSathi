@@ -143,7 +143,12 @@ body {
   padding: 1.5rem;
   min-height: 150px;
   border: 1px solid var(--border-color);
-  word-wrap: break-word;
+  /* Prevent long unbroken text or HTML from overflowing the container */
+  overflow-wrap: anywhere; /* modern browsers */
+  word-break: break-word; /* fallback */
+  /* Allow scrolling for very long translations while keeping layout intact */
+  max-height: 60vh;
+  overflow: auto;
   font-size: 1.1rem;
   line-height: 1.8;
   white-space: pre-wrap;

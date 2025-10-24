@@ -64,11 +64,37 @@ gmail_client = GmailClient() if GMAIL_AVAILABLE else None
 # Global variable to store user credentials
 user_credentials = {}
 
+
+def _require_auth_or_return_auth_url():
+    """
+    Helper to check for stored credentials and, if missing, return an
+    HTTP 401 with an optional Gmail auth URL so the frontend can redirect
+    the user to authenticate.
+    """
+    user_id = "current_user"
+    if user_id in user_credentials:
+        return user_credentials[user_id]
+
+    # If Gmail integration is available, try to provide an auth URL
+    auth_url = None
+    if GMAIL_AVAILABLE:
+        try:
+            auth_url = gmail_client.get_auth_url()
+        except Exception:
+            auth_url = None
+
+    raise HTTPException(status_code=401, detail={
+        "message": "Not authenticated",
+        "auth_url": auth_url
+    })
+
 class InputText(BaseModel):
     text: str
+    language: Optional[str] = "Marathi"
 
 class EmailRequest(BaseModel):
     message_id: str
+    language: Optional[str] = "Marathi"
 
 # Models for Gmail API
 class AuthResponse(BaseModel):
@@ -87,10 +113,13 @@ async def translate_to_marathi(req: InputText):
         raise HTTPException(status_code=400, detail="No text provided")
     
     logger.info(f"Translating text: {req.text[:50]}...")
-    translated_text = mcp_client.translate_to_marathi(req.text)
+    # Use requested language if provided
+    lang = req.language or "Marathi"
+    translated_text = mcp_client.translate(req.text, target_language=lang)
     logger.info("Translation completed")
     
-    return {"marathi_translation": translated_text}
+    # Return both legacy key and a generic key
+    return {"marathi_translation": translated_text, "translation": translated_text, "language": lang}
 
 @app.get("/gmail/auth-url")
 async def get_gmail_auth_url() -> AuthResponse:
@@ -184,15 +213,14 @@ async def get_recent_emails(max_results: int = 10):
             detail="Gmail integration is not available. Please install required packages: 'pip install google-auth google-auth-oauthlib google-api-python-client'"
         )
         
-    user_id = "current_user"
-    if user_id not in user_credentials:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
+    # Ensure user is authenticated or provide auth URL in the 401 detail
+    creds = _require_auth_or_return_auth_url()
+
     try:
         # Set credentials from stored data
         client = GmailClient()
-        client.set_credentials(json.dumps(user_credentials[user_id]))
-        
+        client.set_credentials(json.dumps(creds))
+
         # Get recent emails
         emails = client.get_recent_emails(max_results=max_results)
         return {"emails": emails}
@@ -211,15 +239,14 @@ async def get_email_content(req: EmailRequest):
             detail="Gmail integration is not available. Please install required packages: 'pip install google-auth google-auth-oauthlib google-api-python-client'"
         )
         
-    user_id = "current_user"
-    if user_id not in user_credentials:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
+    # Ensure user is authenticated or provide auth URL in the 401 detail
+    creds = _require_auth_or_return_auth_url()
+
     try:
         # Set credentials from stored data
         client = GmailClient()
-        client.set_credentials(json.dumps(user_credentials[user_id]))
-        
+        client.set_credentials(json.dumps(creds))
+
         # Get email content
         email = client.get_email_content(req.message_id)
         return {"email": email}
@@ -238,21 +265,20 @@ async def translate_email(req: EmailRequest):
             detail="Gmail integration is not available. Please install required packages: 'pip install google-auth google-auth-oauthlib google-api-python-client'"
         )
         
-    user_id = "current_user"
-    if user_id not in user_credentials:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    
+    # Ensure user is authenticated or provide auth URL in the 401 detail
+    creds = _require_auth_or_return_auth_url()
+
     try:
         # Set credentials from stored data
         client = GmailClient()
-        client.set_credentials(json.dumps(user_credentials[user_id]))
-        
+        client.set_credentials(json.dumps(creds))
         # Get email content
         email = client.get_email_content(req.message_id)
-        
-        # Translate the email body
-        translated_body = mcp_client.translate_to_marathi(email["body"])
-        
+
+        # Translate the email body using requested language
+        lang = req.language or "Marathi"
+        translated_body = mcp_client.translate(email["body"], target_language=lang)
+
         # Return both original and translated content
         return {
             "original_email": email,
