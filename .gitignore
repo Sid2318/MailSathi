@@ -242,3 +242,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Frontend Tailwind/Vite generated file
+/frontend/output.css
+
+# Optional: lockfiles or local artifacts
+package-lock.json
+
