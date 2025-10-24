@@ -48,6 +48,61 @@ class GmailClient:
         try:
             self.service = build('gmail', 'v1', credentials=self.credentials)
         except Exception as e:
+            logger.error(f"Error building Gmail service: {e}")
+            raise
+
+    def get_recent_messages(self, max_results: int = 16) -> List[Dict[str, Any]]:
+        """
+        Get recent messages from Gmail inbox
+        """
+        if not self.service:
+            raise ValueError("Gmail service not initialized")
+
+        try:
+            # Query for messages from inbox
+            results = self.service.users().messages().list(
+                userId='me',
+                labelIds=['INBOX'],
+                maxResults=max_results
+            ).execute()
+
+            messages = results.get('messages', [])
+            email_details = []
+
+            for message in messages:
+                msg_id = message['id']
+                try:
+                    msg = self.service.users().messages().get(
+                        userId='me',
+                        id=msg_id,
+                        format='full'
+                    ).execute()
+
+                    # Get headers
+                    headers = msg['payload']['headers']
+                    subject = next((h['value'] for h in headers if h['name'].lower() == 'subject'), 'No Subject')
+                    from_email = next((h['value'] for h in headers if h['name'].lower() == 'from'), 'Unknown Sender')
+                    date = next((h['value'] for h in headers if h['name'].lower() == 'date'), '')
+
+                    # Get snippet for preview
+                    snippet = msg.get('snippet', '')
+
+                    email_details.append({
+                        'id': msg_id,
+                        'subject': subject,
+                        'from': from_email,
+                        'date': date,
+                        'snippet': snippet
+                    })
+                except Exception as e:
+                    logger.error(f"Error fetching message {msg_id}: {e}")
+                    continue
+
+            return email_details
+
+        except Exception as e:
+            logger.error(f"Error fetching recent messages: {e}")
+            raise
             logger.error(f"Error building Gmail service: {str(e)}")
             raise
 

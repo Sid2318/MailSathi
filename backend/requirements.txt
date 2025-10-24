@@ -6,3 +6,6 @@ pydantic
 python-dotenv
 requests
 uvicorn[standard]
+gTTS
+pygame
+langchain-google-genai

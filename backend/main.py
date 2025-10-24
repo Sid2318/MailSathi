@@ -8,6 +8,7 @@ import os
 import json
 from typing import Dict, Any, List, Optional
 import sys
+from tts_service import tts_service
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -16,6 +17,11 @@ logger = logging.getLogger(__name__)
 # Load environment variables early
 from dotenv import load_dotenv
 load_dotenv(verbose=True)
+
+# Create audio output directory if it doesn't exist
+AUDIO_DIR = os.path.join(os.path.dirname(__file__), "audio_cache")
+os.makedirs(AUDIO_DIR, exist_ok=True)
+os.chdir(os.path.dirname(__file__))  # Change to backend directory for relative paths
 
 # Log environment variable status (without exposing values)
 logger.info(f"GMAIL_CLIENT_ID set: {'Yes' if os.getenv('GMAIL_CLIENT_ID') else 'No'}")
@@ -41,6 +47,22 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+class AudioCleanupRequest(BaseModel):
+    message_id: str
+    language: str
+
+@app.post("/tts/cleanup")
+async def cleanup_audio(req: AudioCleanupRequest):
+    """
+    Cleanup audio file after playback is complete
+    """
+    try:
+        success = tts_service.cleanup_audio_file(req.message_id, req.language)
+        return {"success": success}
+    except Exception as e:
+        logger.error(f"Error cleaning up audio: {e}")
+        raise HTTPException(status_code=500, detail="Failed to cleanup audio file")
 
 # Add CORS middleware
 app.add_middleware(
@@ -102,6 +124,16 @@ class AuthResponse(BaseModel):
 
 class TokenData(BaseModel):
     code: str
+
+class TTSRequest(BaseModel):
+    email: Dict[str, Any]
+    translated_body: str
+    language: str
+    message_id: str
+
+class TTSResponse(BaseModel):
+    success: bool
+    message: Optional[str] = None
 
 class CredentialResponse(BaseModel):
     token: str
@@ -203,7 +235,7 @@ async def check_auth() -> CredentialResponse:
         return {"token": "", "success": False}
 
 @app.get("/gmail/recent-emails")
-async def get_recent_emails(max_results: int = 10):
+async def get_recent_emails(max_results: int = 16):
     """
     Get recent emails from the user's Gmail inbox
     """
@@ -213,8 +245,17 @@ async def get_recent_emails(max_results: int = 10):
             detail="Gmail integration is not available. Please install required packages: 'pip install google-auth google-auth-oauthlib google-api-python-client'"
         )
         
-    # Ensure user is authenticated or provide auth URL in the 401 detail
+    # try:
+        # Ensure user is authenticated or provide auth URL in the 401 detail
     creds = _require_auth_or_return_auth_url()
+        
+    #     # Update client credentials and fetch messages
+    #     gmail_client.credentials = creds
+    #     messages = gmail_client.get_recent_messages(max_results=max_results)
+    #     return {"messages": messages}
+    # except Exception as e:
+    #     logger.error(f"Error fetching recent emails: {e}")
+    #     raise HTTPException(status_code=500, detail=str(e))
 
     try:
         # Set credentials from stored data
@@ -257,7 +298,7 @@ async def get_email_content(req: EmailRequest):
 @app.post("/gmail/translate-email")
 async def translate_email(req: EmailRequest):
     """
-    Get and translate the content of a specific email
+    Get and translate the content of a specific email, generating audio in parallel
     """
     if not GMAIL_AVAILABLE:
         raise HTTPException(
@@ -279,11 +320,67 @@ async def translate_email(req: EmailRequest):
         lang = req.language or "Marathi"
         translated_body = mcp_client.translate(email["body"], target_language=lang)
 
+        # Generate audio file in parallel with response
+        speech_text = tts_service.format_email_for_speech(email, translated_body, lang)
+        
+        # Generate the audio file (will be cached) - don't play it yet
+        audio_generated = tts_service.generate_audio(
+            email_data=email,
+            translated_body=translated_body,
+            lang=lang,
+            email_id=req.message_id
+        )
+
+        try:
+            # Generate audio file in background
+            speech_text = tts_service.format_email_for_speech(email, translated_body, lang)
+            audio_generated = tts_service.generate_audio(
+                email_data=email,
+                translated_body=translated_body,
+                lang=lang,
+                email_id=req.message_id
+            )
+        except Exception as e:
+            logger.error(f"Error generating audio: {e}")
+            audio_generated = False
+
         # Return both original and translated content
         return {
             "original_email": email,
-            "translated_body": translated_body
+            "translated_body": translated_body,
+            "audio_ready": audio_generated
         }
     except Exception as e:
         logger.error(f"Error translating email: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error translating email: {str(e)}")
+
+@app.post("/tts/speak-email")
+async def speak_email(req: TTSRequest) -> TTSResponse:
+    """
+    Convert email content to speech in the target language
+    """
+    try:
+        # Format the email content for speech
+        speech_text = tts_service.format_email_for_speech(
+            req.email,
+            req.translated_body,
+            req.language
+        )
+        
+        # Generate and play the audio
+        success = tts_service.speak_text(
+            text=speech_text,
+            lang=req.language,
+            email_id=req.message_id
+        )
+        
+        if success:
+            return {"success": True, "message": "Audio playback started"}
+        else:
+            return {"success": False, "message": "Failed to generate audio"}
+            
+    except Exception as e:
+        logger.error(f"Error in text-to-speech: {str(e)}")
+        return {"success": False, "message": str(e)}
+
+
