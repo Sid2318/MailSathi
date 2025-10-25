@@ -196,7 +196,7 @@ async def auth_callback(code: str, state: Optional[str] = None):
     Handle the OAuth callback from Google
     """
     if not GMAIL_AVAILABLE:
-        return RedirectResponse(url=f"http://localhost:5174?auth=error&message=Gmail integration not available")
+        return RedirectResponse(url=f"http://localhost:5173?auth=error&message=Gmail integration not available")
         
     try:
         # Exchange code for credentials
@@ -215,10 +215,10 @@ async def auth_callback(code: str, state: Optional[str] = None):
         }
         
         # Redirect to frontend with success indicator
-        return RedirectResponse(url=f"http://localhost:5174?auth=success")
+        return RedirectResponse(url=f"http://localhost:5173?auth=success")
     except Exception as e:
         logger.error(f"Error in auth callback: {str(e)}")
-        return RedirectResponse(url=f"http://localhost:5174?auth=error&message={str(e)}")
+        return RedirectResponse(url=f"http://localhost:5173?auth=error&message={str(e)}")
 
 @app.get("/gmail/check-auth")
 async def check_auth() -> CredentialResponse:
